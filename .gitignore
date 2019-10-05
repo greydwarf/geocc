@@ -30,3 +30,7 @@
 *.exe
 *.out
 *.app
+
+# Derived files
+*_generated.h
+build/*

@@ -1,0 +1,27 @@
+namespace fb;
+
+table Point {
+   lat:double;
+   lon:double;
+}
+
+table Loop {
+   vertices:[Point];
+}
+   
+table Polygon {
+   loops:[Loop];
+}
+   
+table Country {
+   id:int32;
+   fips:string;
+   iso2:string;
+   iso3:string;
+   name:string;
+   is_water:bool;
+   regions:[Polygon];
+}
+
+root_type Country;
+
