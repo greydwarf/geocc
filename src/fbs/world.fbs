@@ -1,8 +1,9 @@
 namespace fb;
 
 table Point {
-   lat:double;
-   lon:double;
+   x:double;
+   y:double;
+   z:double;
 }
 
 table Loop {

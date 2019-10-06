@@ -105,13 +105,54 @@ std::unique_ptr<Regions> parse_polys_s2(pqxx::work& txn, const std::string& coun
    return ret;
 }
 
-std::vector<Country> countries_from_db() {
+void write_country(FILE* out, const Country& country) {
+   flatbuffers::FlatBufferBuilder builder(1024*1024);
+   std::vector<flatbuffers::Offset<fb::Polygon>> fb_regions;
+   for (auto& s2poly : *country.regions) {
+      std::vector<flatbuffers::Offset<fb::Loop>> fb_loops;
+      for (int ii=0; ii < s2poly->num_loops(); ++ii) {
+         const auto s2loop = s2poly->loop(ii);
+         std::vector<flatbuffers::Offset<fb::Point>> fb_points;
+         for (int jj=0; jj < s2loop->num_vertices(); ++jj) {
+            const auto& vertex = s2loop->vertex(jj);
+            const auto& data = vertex.Data();
+            auto point = fb::CreatePoint(builder, data[0], data[1], data[2]);
+            fb_points.push_back(point);
+         }
+         auto vertices = builder.CreateVector(fb_points);
+         auto fb_loop = CreateLoop(builder, vertices);
+         fb_loops.push_back(fb_loop);
+      }
+      auto fb_loop_vector = builder.CreateVector(fb_loops);
+      auto fb_poly = CreatePolygon(builder, fb_loop_vector);
+      fb_regions.push_back(fb_poly);
+   }
+   auto fb_poly_vector = builder.CreateVector(fb_regions);
+   auto fb_fips = builder.CreateString(country.fips);
+   auto fb_iso3 = builder.CreateString(country.iso3);
+   auto fb_name = builder.CreateString(country.name);
+
+   fb::CountryBuilder cb(builder);
+   cb.add_regions(fb_poly_vector);
+   cb.add_name(fb_name);
+   cb.add_iso3(fb_iso3);
+   cb.add_fips(fb_fips);
+   cb.add_is_water(country.is_water);
+   auto fb_country = cb.Finish();
+   builder.Finish(fb_country);
+
+   builder.Finish(fb_country);
+   uint32_t sz = builder.GetSize();
+   fwrite(&sz, sizeof(sz), 1, out);
+   fwrite(builder.GetBufferPointer(), sz, 1, out);
+}
+
+void generate_countries_from_db(FILE* out) {
    pqxx::connection conn("host='localhost' user='bsellers' dbname='cclookup'");
    pqxx::work txn(conn);
 
-   std::vector<Country> ret;
    auto db_countries = 
-      txn.exec("SELECT id, fips, iso3, name, is_water from map where name like 'Arg%' order by id");
+      txn.exec("SELECT id, fips, iso3, name, is_water from map order by id");
    for (const auto& db_country: db_countries) {
       Country c;
       c.id = db_country[0].as<int>(0);
@@ -119,23 +160,22 @@ std::vector<Country> countries_from_db() {
       c.iso3 = db_country[2].as<std::string>("");
       c.name = db_country[3].as<std::string>("");
       c.is_water = db_country[4].as<bool>(false);
+      printf("%s: s2 ", c.name.c_str());
+      fflush(stdout);
       c.regions = std::move(parse_polys_s2(txn, db_country[0].as<std::string>("")));
-      ret.emplace_back(std::move(c));
+      printf("done. write "); 
+      fflush(stdout);
+      write_country(out, c);
+      printf("done.\n"); 
    }
-   return ret;
-}
-
-void write_countries(FILE* out, const std::vector<Country>& ccs)
-{
 }
 
 int main() {
-   auto f = fopen("/home/bsellers/go/src/github.com/greydwarf/geocc/world_map.dat", "wb");
+   auto f = fopen("data/world_map.dat", "wb");
    if (f == nullptr)  {
       perror("Error: ");
       exit(1);
    }
 
-   auto ccs = countries_from_db();
-   write_countries(f, ccs);
+   generate_countries_from_db(f);
 }
