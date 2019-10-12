@@ -25,84 +25,73 @@ static bool starts_with(const std::string& a, const std::string& prefix) {
    return std::equal(prefix.begin(), prefix.end(), a.begin());
 }
 
-static S2Point to_point(const latlon p) {
-   auto safe_lat = std::min(std::max(-89.999999, p.first), 89.999999);
-   auto safe_lon = std::min(std::max(-179.999999, p.second), 179.999999);
+static S2Point to_point(double lat, double lon) {
+   auto safe_lat = std::min(std::max(-89.999999, lat), 89.999999);
+   auto safe_lon = std::min(std::max(-179.999999, lon), 179.999999);
    return S2Point(S2LatLng::FromDegrees(safe_lat, safe_lon));
 }
 
-raw_loop parse_loop(const std::string& wkt, size_t& start) {
-   raw_loop ret;
-   if (wkt[start] != '(') return ret;
-   start++;
+char eat_char(const std::string& str, size_t& pos, const char* expected) {
+   for (const char *x = expected; x; ++x) {
+      if (str[pos] == *x) {
+         pos++;
+         return *x;
+      }
+   }
+   std::cerr << "wkt: " << str << "\npos: " << pos << 
+      ".  Expected one of '" << expected << "', Instead found: " << str[pos] << std::endl;
+   throw std::runtime_error("Parse error");
+}
+
+std::unique_ptr<S2Loop> parse_loop(const std::string& wkt, size_t& start) {
+   std::vector<S2Point> points;
+   eat_char(wkt, start, "(");
    while (true) {
       size_t end;
-      double lat = std::stod(wkt.substr(start), &end);
-      end += start;
-      if (wkt[end] != ' ') throw std::runtime_error("Parse error: space expected");
-
-      start = end+1;
       double lon = std::stod(wkt.substr(start), &end);
-      ret.emplace_back(lat, lon);
-      end += start;
-      start = end+1;
-      if (wkt[end] == ')') {
+      start += end;
+      eat_char(wkt, start, " ");
+
+      double lat = std::stod(wkt.substr(start), &end);
+      points.emplace_back(to_point(lat, lon));
+      start+= end;
+      char next = eat_char(wkt, start, "),");
+      if (next == ')') {
+         points.pop_back();
+         auto ret = std::make_unique<S2Loop>(points);
          return ret;
       } 
    }
-   return ret;
 }
 
-raw_poly parse_wkt(const std::string& wkt) {
-   raw_poly ret;
-   size_t start = 0;
-   if (!starts_with(wkt, "POLYGON(")) return ret;
-   start = strlen("POLYGON(");
+std::unique_ptr<S2Polygon> parse_polygon(const std::string& wkt, size_t& start) {
+   auto loops = std::vector<std::unique_ptr<S2Loop>>();
    while (true) {
-      ret.emplace_back(parse_loop(wkt, start));
-      if (wkt[start] == ',') start++;
-      if (wkt[start] == ')') return ret;
-   }
-}
-
-std::unique_ptr<S2Polygon> wkt_to_s2(const raw_poly& in) {
-   auto s2poly = std::make_unique<S2Polygon>();
-   S2Builder::Options opts;
-   opts.set_split_crossing_edges(true);
-   S2Builder builder(opts);
-   s2builderutil::S2PolygonLayer::Options layerOpts(S2Builder::EdgeType::UNDIRECTED);
-   builder.StartLayer(std::make_unique<s2builderutil::S2PolygonLayer>(s2poly.get(), layerOpts));
-
-   for (auto& loop : in) {
-      if (loop.empty()) throw std::runtime_error("Parse error: Empty loop detected");
-      for (size_t ii = 1; ii < loop.size(); ++ii) {
-         auto l0 = to_point(loop[ii-1]);
-         auto l1 = to_point(loop[ii]);
-         builder.AddEdge(l0, l1);
+      eat_char(wkt, start, "(");
+      loops.emplace_back(parse_loop(wkt, start));
+      char next = eat_char(wkt, start, "),");
+      if (next == ')') {
+         auto ret = std::make_unique<S2Polygon>();
+         ret->InitNested(std::move(loops));
+         return ret;
       }
-      auto l1 = to_point(loop[0]);
-      auto l0 = to_point(loop[loop.size()-1]);
-      builder.AddEdge(l0, l1);
    }
-   S2Error err;
-   if (!builder.Build(&err))
-   {
-      fprintf(stderr, "%s\n", err.text().c_str());
-      return std::unique_ptr<S2Polygon>();
-   }
-   return s2poly;
 }
 
-std::unique_ptr<Regions> parse_polys_s2(pqxx::work& txn, const std::string& country_id) {
-   auto q = "SELECT ST_AsText(ST_Subdivide(border, 100)) from map where id = " + country_id;
-   auto db_rows = txn.exec(q);
+std::unique_ptr<Regions> parse_wkt(const std::string& wkt) {
+   size_t start = 0;
    auto ret = std::make_unique<Regions>();
-   for (const auto& row: db_rows) {
-      auto a = parse_wkt(row[0].as<std::string>(""));
-      auto s2_polys = wkt_to_s2(a);
-      ret->emplace_back(std::move(s2_polys));
+   if (!starts_with(wkt, "MULTIPOLYGON(")) return ret;
+   start = strlen("MULTIPOLYGON(");
+   while (true) {
+      ret->emplace_back(parse_polygon(wkt, start));
+
+      char next = eat_char(wkt, start, "),");
+      if (next == ')') {
+         start++;
+         return ret;
+      }
    }
-   return ret;
 }
 
 void write_country(FILE* out, const Country& country) {
@@ -152,7 +141,8 @@ void generate_countries_from_db(FILE* out) {
    pqxx::work txn(conn);
 
    auto db_countries = 
-      txn.exec("SELECT id, fips, iso3, name, is_water from map order by id");
+      txn.exec("SELECT id, fips, iso3, name, is_water, ST_AsText(border) "
+               "FROM map where fips in ('US', 'FP', 'IR') order by id");
    for (const auto& db_country: db_countries) {
       Country c;
       c.id = db_country[0].as<int>(0);
@@ -162,7 +152,7 @@ void generate_countries_from_db(FILE* out) {
       c.is_water = db_country[4].as<bool>(false);
       printf("%s: s2 ", c.name.c_str());
       fflush(stdout);
-      c.regions = std::move(parse_polys_s2(txn, db_country[0].as<std::string>("")));
+      c.regions = std::move(parse_wkt(db_country[5].as<std::string>("")));
       printf("done. write "); 
       fflush(stdout);
       write_country(out, c);
