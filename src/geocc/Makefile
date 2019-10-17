@@ -3,5 +3,5 @@ LDFLAGS=-lzstd -lgeos_c -lgeos
 
 ../../build/%.o: %.cc Makefile
 	$(CXX) -o $@ $< -c $(CXXFLAGS)
-../../build/geocc: ../../build/geocc.o
-	$(CXX) -o $@ $< $(LDFLAGS)
+../../build/geocc: ../../build/MapIndex.o ../../build/geocc.o
+	$(CXX) -o $@ $^ $(LDFLAGS)
