@@ -1,19 +1,9 @@
 namespace fb;
 
-table Point {
-   x:double;
-   y:double;
-   z:double;
+table Polygon {
+   wkt: string;
 }
 
-table Loop {
-   vertices:[Point];
-}
-   
-table Polygon {
-   loops:[Loop];
-}
-   
 table Country {
    id:int32;
    fips:string;
