@@ -18,7 +18,7 @@ struct RegionEntry {
 };
 
 struct QCBParams {
-   GEOSContextHandle_t* ctx;
+   const GEOSContextHandle_t* ctx;
    std::set<const geocc::Country*>* ret;
    GEOSGeometry* p;
 };
@@ -112,7 +112,7 @@ void geocc::MapIndex::readWorldMap(FILE *f) {
    GEOSWKTReader_destroy_r(ctx, geosReader);
 }
 
-std::set<const geocc::Country*> geocc::MapIndex::countryContaining(double lat, double lon) {
+std::set<const geocc::Country*> geocc::MapIndex::countryContaining(double lat, double lon) const {
    std::set<const geocc::Country*> ret;
    auto lonlat = GEOSCoordSeq_create_r(ctx,1, 2);
    if (lonlat == nullptr) {

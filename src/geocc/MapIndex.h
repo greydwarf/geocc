@@ -18,7 +18,7 @@ public:
    MapIndex();
    ~MapIndex();
    void readWorldMap(FILE *f);
-   std::set<const geocc::Country*> countryContaining(double lat, double lon);
+   std::set<const geocc::Country*> countryContaining(double lat, double lon) const;
 private:
    GEOSContextHandle_t ctx;
    GEOSSTRtree* tree;
