@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <stdarg.h>
 #include <cassert>
+#include <cmath>
 #include <unordered_map>
 
 char* NOTICE=const_cast<char*>("NOTICE");
@@ -50,12 +51,46 @@ geocc::MapIndex::MapIndex() {
    GEOSContext_setNoticeMessageHandler_r(ctx, geosMessageHandler, static_cast<void*>(NOTICE));
    GEOSContext_setErrorMessageHandler_r(ctx, geosMessageHandler, static_cast<void*>(ERROR));
    tree = GEOSSTRtree_create_r(ctx, 10);
+   for (int ii=0; ii < NUM_POINTS; ++ii) {
+      double theta = 2*M_PI/NUM_POINTS * ii;
+      sines[ii] = sin(theta);
+      cosines[ii] = cos(theta);
+   }
 }
 
 geocc::MapIndex::~MapIndex() {
    GEOSSTRtree_iterate(tree, cleanRegions, &ctx);
    GEOSSTRtree_destroy_r(ctx, tree);
    GEOS_finish_r(ctx);
+}
+
+GEOSGeometry* geocc::MapIndex::make_ellipse(double lat, double lon, double smaj, double smin, double orient) const {
+   auto ellipse_points = GEOSCoordSeq_create_r(ctx, NUM_POINTS+1, 2);
+   
+   orient = orient*M_PI/180;    // convert degrees to radians
+   orient = M_PI/2.0 - orient;  // Convert from compass to cartesian orientation
+
+   // Convert Km to degrees latitude/longitude
+   smaj = smaj/110.0;
+   smin = smin/110.0;
+
+   for (int ii=0; ii < NUM_POINTS; ++ii) {
+      if (GEOSCoordSeq_setX_r(ctx, ellipse_points, ii, 
+                          lon + smaj*cosines[ii]*cos(orient) - smin*sines[ii]*sin(orient)) == 0) {
+         printf("error: 1\n");
+      }
+      if (GEOSCoordSeq_setY_r(ctx, ellipse_points, ii,
+                          lat + smaj*cosines[ii]*sin(orient) + smin*sines[ii]*cos(orient)) == 0) {
+         printf("error: 2\n");
+      }
+   }
+   double x;
+   double y;
+   GEOSCoordSeq_getX_r(ctx, ellipse_points, 0, &x);
+   GEOSCoordSeq_getY_r(ctx, ellipse_points, 0, &y);
+   GEOSCoordSeq_setX_r(ctx, ellipse_points, NUM_POINTS, x);
+   GEOSCoordSeq_setY_r(ctx, ellipse_points, NUM_POINTS, y);
+   return GEOSGeom_createLinearRing_r(ctx, ellipse_points);
 }
 
 void geocc::MapIndex::readWorldMap(FILE *f) {
@@ -114,18 +149,8 @@ void geocc::MapIndex::readWorldMap(FILE *f) {
 
 std::set<const geocc::Country*> geocc::MapIndex::countryContaining(double lat, double lon) const {
    std::set<const geocc::Country*> ret;
-   auto lonlat = GEOSCoordSeq_create_r(ctx,1, 2);
-   if (lonlat == nullptr) {
-      printf("error: 1\n");
-      return ret;
-   }
-   if (GEOSCoordSeq_setX_r(ctx, lonlat, 0, lon) == 0 ||
-      GEOSCoordSeq_setY_r(ctx, lonlat, 0, lat) == 0) {
-      printf("error: 2\n");
-      return ret;
-   }
 
-   auto point = GEOSGeom_createPoint_r(ctx, lonlat);
+   auto point = make_ellipse(lat, lon, 0.5, 0.5, 0);
    if (point == nullptr) {
       printf("error: 4\n");
       return ret;

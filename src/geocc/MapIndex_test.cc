@@ -58,8 +58,10 @@ std::vector<City> read_cities(std::istream& cities) {
       {"ng","ni"}, {"ne","ng"}, {"mw","mi"}, {"mn","mg"}, {"mm","bm"},
       {"mg","ma"}, {"me","mj"}, {"ma","mo"}, {"lv","lg"}, {"lt","lh"},
       {"lr","li"}, {"lk","ce"}, {"lb","le"}, {"kr","ks"}, {"kp","kn"},
-      {"bh","ba"}, {"gf","fg"}, {"ht","ha"},
-      {"ie","ei"}, {"il","is"}, {"iq","iz"}, {"jp","ja"}, {"kh","cb"}
+      {"bh","ba"}, {"gf","fg"}, {"ht","ha"}, {"yt","mf"}, {"vu","nh"},
+      {"ie","ei"}, {"il","is"}, {"iq","iz"}, {"jp","ja"}, {"kh","cb"},
+      {"tm","tx"}, {"ag","ac"}, {"sr","ns"}, {"st","tp"}, {"aw","aa"},
+      {"bs","bf"}
    };
    std::string line;
    while (getline(cities, line)) {
@@ -95,6 +97,11 @@ void test_cities(const geocc::MapIndex& idx, const std::vector<City>& cities) {
          passed++;
       } else {
          failed++;
+         if (ccs.empty()) {
+            printf("Expected: %s, no cc (%s)\n", city.expected.c_str(), city.name.c_str());
+         } else {
+            printf("Expected: %s, found %s (%s)\n", city.expected.c_str(), (*ccs.begin())->fips.c_str(), city.name.c_str());
+         }
       }
 
    }
